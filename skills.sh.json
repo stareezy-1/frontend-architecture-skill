@@ -15,6 +15,16 @@
       "title": "Performance",
       "description": "Portable, framework-agnostic Lighthouse CI performance gate: Core Web Vitals budgets and category score floors enforced as a blocking PR check.",
       "skills": ["frontend-lighthouse"]
+    },
+    {
+      "title": "Data Layer",
+      "description": "Portable, framework-agnostic data-layer craft: a typed network boundary (parse-don't-validate, one envelope, one error type, branded IDs) and the optimistic-mutation write path (snapshot/rollback, idempotency, cache coherence).",
+      "skills": ["frontend-data-contracts", "frontend-optimistic-mutations"]
+    },
+    {
+      "title": "Observability",
+      "description": "Portable, framework-agnostic field-side observability: a typed event taxonomy, best-effort provider fan-out, real-user Core Web Vitals, error reporting, and consent gating.",
+      "skills": ["frontend-observability"]
     }
   ]
 }
