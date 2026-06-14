@@ -1,5 +1,7 @@
 # Frontend Architecture Skill
 
+[![skills.sh](https://skills.sh/b/stareezy-1/frontend-architecture-skill)](https://skills.sh/stareezy-1/frontend-architecture-skill)
+
 A portable, **framework-agnostic** architecture style for any React or React Native frontend — packaged as an [Agent Skill](https://www.anthropic.com/news/skills) (`SKILL.md`) that Claude Code, Cursor, OpenCode, Codex, Windsurf, and other agents can read and apply.
 
 It organizes apps into **feature modules** with **page/screen directories**, a strict **server-state vs UI-state split**, **barrel-only** cross-module imports, **co-located styles**, and clear **component-promotion** rules.
