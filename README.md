@@ -2,16 +2,21 @@
 
 [![skills.sh](https://skills.sh/b/stareezy-1/frontend-architecture-skill)](https://skills.sh/stareezy-1/frontend-architecture-skill)
 
-A portable, **framework-agnostic** architecture style for any React or React Native frontend — packaged as an [Agent Skill](https://www.anthropic.com/news/skills) (`SKILL.md`) that Claude Code, Cursor, OpenCode, Codex, Windsurf, and other agents can read and apply.
+A collection of portable, **framework-agnostic** skills for any React or React Native frontend — packaged as [Agent Skills](https://www.anthropic.com/news/skills) (`SKILL.md`) that Claude Code, Cursor, OpenCode, Codex, Windsurf, and other agents can read and apply.
 
-It organizes apps into **feature modules** with **page/screen directories**, a strict **server-state vs UI-state split**, **barrel-only** cross-module imports, **co-located styles**, and clear **component-promotion** rules.
+This repo ships two skills:
+
+- **`frontend-architecture`** — organizes apps into **feature modules** with **page/screen directories**, a strict **server-state vs UI-state split**, **barrel-only** cross-module imports, **co-located styles**, and clear **component-promotion** rules.
+- **`frontend-seo`** — a complete **SEO system**: centralized site identity, canonical URLs, per-route metadata (Open Graph + Twitter cards), generated `sitemap.xml` / `robots.txt` / RSS feed, and typed **JSON-LD structured data** (Person, WebSite, BlogPosting, CreativeWork, BreadcrumbList, FAQPage).
+
+Both share the same design goals:
 
 - ✅ **State-management agnostic** — Zustand, Redux Toolkit, MobX, Jotai, Valtio, or Context.
 - ✅ **Styling agnostic** — Tailwind, CSS Modules, Tamagui, React Native StyleSheet, styled-components.
-- ✅ **Framework agnostic** — Next.js App Router, React + Vite, Remix, and Expo / React Native.
+- ✅ **Framework agnostic** — Next.js App Router, React + Vite, Remix, Astro, and Expo / React Native.
 - ✅ **Naming conventions** — interfaces prefixed with `I` (e.g. `IFeatureUiState`).
 
-> The skill describes a **structure and a set of rules**, not a component library or a visual design. Pair it with a design/component skill for the look-and-feel.
+> The skills describe **structure and rules**, not a component library or a visual design. Pair them with a design/component skill for the look-and-feel.
 
 ---
 
@@ -20,8 +25,11 @@ It organizes apps into **feature modules** with **page/screen directories**, a s
 With the [`skills` CLI](https://skills.sh) (works across Claude Code, Cursor, Codex, and more):
 
 ```bash
-# install just this skill
+# install just the architecture skill
 npx skills add stareezy-1/frontend-architecture-skill --skill "frontend-architecture"
+
+# install just the SEO skill
+npx skills add stareezy-1/frontend-architecture-skill --skill "frontend-seo"
 
 # or install every skill in the repo
 npx skills add stareezy-1/frontend-architecture-skill
@@ -34,16 +42,18 @@ Or copy it manually into your agent's skills directory:
 ```bash
 # Claude Code (project scope)
 mkdir -p .claude/skills && cp -r skills/frontend-architecture .claude/skills/
+cp -r skills/frontend-seo .claude/skills/
 
 # Cursor / others that read .ai/skills
 mkdir -p .ai/skills && cp -r skills/frontend-architecture .ai/skills/
+cp -r skills/frontend-seo .ai/skills/
 ```
 
 > Note: `gh skill install` is a preview feature of the GitHub CLI and is not yet available in stable `gh` releases. Use the `npx skills` command above (or manual copy) until it ships.
 
 ---
 
-## The architecture at a glance
+## The `frontend-architecture` skill at a glance
 
 The whole model is five rules applied mechanically. The diagrams below show how they fit together.
 
@@ -177,11 +187,13 @@ sequenceDiagram
 
 ```
 skills/
-└── frontend-architecture/
-    └── SKILL.md     ← the skill (frontmatter + instructions)
+├── frontend-architecture/
+│   └── SKILL.md     ← architecture skill (frontmatter + instructions)
+└── frontend-seo/
+    └── SKILL.md     ← SEO skill (frontmatter + instructions)
 ```
 
-The skill covers:
+The **`frontend-architecture`** skill covers:
 
 1. **Five core ideas** — feature modules, page directories, state-by-origin, barrel imports, promotion.
 2. **Directory layout** — identical across frameworks.
@@ -194,13 +206,75 @@ The skill covers:
 
 ---
 
-## When the agent should use it
+## The `frontend-seo` skill at a glance
+
+A complete, framework-agnostic SEO system built as **pure builder functions plus a thin framework adapter**. Site identity lives in one constants module, every URL flows through a single `canonicalUrl()` function, and search engines get a generated sitemap, robots rules, RSS feed, and typed JSON-LD.
+
+### How the pieces fit
+
+```mermaid
+graph TD
+    Const["constants/seo<br/>SINGLE source of identity<br/>URL · name · description · OG · verification"]
+    Canon["canonicalUrl(path)<br/>absolute + normalized URLs"]
+
+    subgraph Builders["services/seo (pure builders)"]
+        Meta["buildMetadata()"]
+        Sitemap["sitemapEntries()"]
+        Robots["robots()"]
+        Rss["rssItems()"]
+        Sd["structuredData() + per-type JSON-LD"]
+    end
+
+    subgraph Adapter["Thin framework adapter (route files)"]
+        Layout["app/layout.tsx<br/>global metadata"]
+        SitemapRoute["app/sitemap.ts"]
+        RobotsRoute["app/robots.ts"]
+        Feed["app/feed.xml/route.ts"]
+        Page["page.tsx<br/>generateMetadata + JSON-LD script"]
+    end
+
+    Const --> Canon
+    Const --> Builders
+    Canon --> Builders
+    Meta --> Layout
+    Meta --> Page
+    Sitemap --> SitemapRoute
+    Robots --> RobotsRoute
+    Rss --> Feed
+    Sd --> Page
+```
+
+The skill covers:
+
+1. **Five core ideas** — one source of identity, absolute canonical URLs, pure builders + thin adapter, typed reusable JSON-LD, content-generated discovery surfaces.
+2. **`constants/seo`** — the single source of truth for site identity.
+3. **`types/seo`** — typed data models (`RouteDescriptor`, `SitemapEntry`, `RobotsConfig`, `RssItem`, `JsonLd`, …).
+4. **Canonical URLs** — one `canonicalUrl()` function used everywhere.
+5. **Per-route metadata** — `buildMetadata`, global defaults in the layout, dynamic overrides.
+6. **Discovery surfaces** — `sitemap.xml`, `robots.txt`, and an RSS feed generated from content.
+7. **Structured data** — typed JSON-LD builders (Person, WebSite, BlogPosting, CreativeWork, BreadcrumbList, FAQPage) cross-referenced by stable `@id`.
+8. **Framework adapters** — Next.js, Remix, Astro, Vite SPA, Expo Router (web).
+9. **Review checklist** for SEO coverage.
+
+---
+
+## When the agent should use them
+
+**`frontend-architecture`:**
 
 - Scaffolding a new app.
 - Adding a feature or module.
 - Deciding where a component, hook, or piece of state belongs.
 - Naming types and interfaces.
 - Reviewing folder structure and import boundaries.
+
+**`frontend-seo`:**
+
+- Adding SEO to a site or wiring metadata into routes.
+- Generating `sitemap.xml`, `robots.txt`, or an RSS feed.
+- Adding schema.org JSON-LD structured data.
+- Fixing canonical-URL or duplicate-content issues.
+- Reviewing SEO coverage before release.
 
 ---
 

@@ -5,6 +5,11 @@
       "title": "Architecture",
       "description": "Portable, framework-agnostic frontend architecture conventions for React and React Native.",
       "skills": ["frontend-architecture"]
+    },
+    {
+      "title": "SEO",
+      "description": "Portable, framework-agnostic SEO system: centralized identity, canonical URLs, metadata, sitemap/robots/RSS, and typed JSON-LD structured data.",
+      "skills": ["frontend-seo"]
     }
   ]
 }
