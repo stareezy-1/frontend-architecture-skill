@@ -11,7 +11,7 @@ This repo ships six skills:
 - **`frontend-lighthouse`** — a **Lighthouse CI performance gate**: Core Web Vitals budgets (LCP, INP via the TBT lab proxy, CLS) and category score floors enforced as a blocking PR check, with a `lighthouserc.cjs`, an `lhci` script, and a GitHub Actions workflow.
 - **`frontend-data-contracts`** — type safety at the **network edge**: one typed API client as the single fetch boundary, parse-don't-validate, one `{ data } / { error }` envelope, one normalized `ApiError`, branded IDs, and per-field error mapping.
 - **`frontend-optimistic-mutations`** — the **write path**: the optimistic lifecycle (cancel → snapshot → patch → rollback → invalidate), idempotency keys for safe retries, and lock-step detail/list cache coherence.
-- **`frontend-observability`** — the **field side**: a typed event taxonomy, a best-effort non-blocking provider fan-out, real-user Core Web Vitals (the complement to Lighthouse's lab gate), error reporting, and consent gating.
+- **`frontend-observability`** — the **field side**: a typed event taxonomy, a best-effort non-blocking provider fan-out (Firebase Analytics, GA4, Clarity, PostHog, Sentry — same adapter shape on web and React Native), real-user Core Web Vitals (the complement to Lighthouse's lab gate), error reporting, and consent gating.
 
 All share the same design goals:
 
@@ -434,6 +434,7 @@ graph TD
 
     subgraph FanOut["track() — best-effort, non-blocking"]
         direction LR
+        FB["firebase adapter<br/>(web + RN)"]
         GA["gtag adapter"]
         Clarity["clarity adapter"]
         PH["posthog adapter"]
@@ -455,7 +456,7 @@ The skill covers:
 5. **Real-user Web Vitals** — reported through the same fan-out, matching the Lighthouse skill's thresholds.
 6. **Consent & privacy** — gated once at the boundary; PII-light props.
 7. **Error reporting** — at deliberate route/segment boundaries.
-8. **Provider & framework adapters** — GA4, Clarity, PostHog, OpenPanel, Sentry; Next.js / Vite / RN.
+8. **Provider & framework adapters** — Firebase Analytics (web + React Native), GA4, Clarity, PostHog, OpenPanel, Sentry; Next.js / Vite / RN.
 9. **Review checklist** for observability.
 
 ---

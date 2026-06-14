@@ -1,9 +1,9 @@
 ---
 name: frontend-observability
-description: A portable, framework-agnostic field-side observability system for any React or React Native app. Establishes one typed event taxonomy (canonical event-name constants, never inline strings), a best-effort non-blocking provider fan-out so a failing or absent analytics provider can never throw into the app or block other providers, a single track() entry point exposed through a context hook, real-user Core Web Vitals (RUM) reporting that complements lab Lighthouse budgets, error reporting at deliberate boundaries, and consent/privacy gating so nothing fires before opt-in. Provider-agnostic (GA4, Microsoft Clarity, PostHog, OpenPanel, Sentry, Vercel/Cloudflare analytics). Use this skill when adding analytics or product tracking, instrumenting user actions, reporting Web Vitals from real users, wiring error reporting, gating telemetry on consent, or designing an event schema. Pairs with the frontend-lighthouse skill (lab budgets ↔ field reality). Works with React + Vite, Next.js, Remix, and Expo / React Native.
+description: A portable, framework-agnostic field-side observability system for any React or React Native app. Establishes one typed event taxonomy (canonical event-name constants, never inline strings), a best-effort non-blocking provider fan-out so a failing or absent analytics provider can never throw into the app or block other providers, a single track() entry point exposed through a context hook, real-user Core Web Vitals (RUM) reporting that complements lab Lighthouse budgets, error reporting at deliberate boundaries, and consent/privacy gating so nothing fires before opt-in. Provider-agnostic (Firebase Analytics, GA4, Microsoft Clarity, PostHog, OpenPanel, Sentry, Vercel/Cloudflare analytics) and works the same on web and React Native via one adapter shape. Use this skill when adding analytics or product tracking, instrumenting user actions, reporting Web Vitals from real users, wiring Firebase Analytics on web or React Native, wiring error reporting, gating telemetry on consent, or designing an event schema. Pairs with the frontend-lighthouse skill (lab budgets ↔ field reality). Works with React + Vite, Next.js, Remix, and Expo / React Native.
 license: MIT — use, copy, and adapt freely.
 compatibility: Works with Claude Code, OpenCode, Codex, Cursor, Windsurf, Copilot, and any tool that reads SKILL.md or is pointed here from AGENTS.md / CLAUDE.md.
-keywords: observability, analytics, telemetry, web vitals, rum, real user monitoring, event tracking, event taxonomy, track, provider fan-out, ga4, google analytics, clarity, posthog, openpanel, sentry, error reporting, consent, privacy, gdpr, LCP, INP, CLS, react, react native
+keywords: observability, analytics, telemetry, web vitals, rum, real user monitoring, event tracking, event taxonomy, track, provider fan-out, firebase, firebase analytics, ga4, google analytics, clarity, posthog, openpanel, sentry, error reporting, consent, privacy, gdpr, LCP, INP, CLS, react, react native, expo
 ---
 
 # Frontend Observability (the field side)
@@ -145,9 +145,70 @@ export const clarityAdapter: AnalyticsAdapter = (event) => {
 export const analyticsAdapters: AnalyticsAdapter[] = [
   googleAnalyticsAdapter,
   clarityAdapter,
+  firebaseAdapter,
   // posthogAdapter, openPanelAdapter, …
 ];
 ```
+
+### 3.1 Firebase Analytics — one adapter, two platforms
+
+Firebase Analytics ships two SDKs that share the **same `logEvent(name, params)` contract**, so a
+single conceptual adapter covers both web and React Native — only the import and the "is it
+available?" guard differ. On web the adapter never imports the SDK at module top level (it's
+browser-only and async), so it stays SSR-safe.
+
+```ts
+// services/analytics/adapters.firebase.web.ts — Firebase JS SDK (web)
+import type { Analytics } from "firebase/analytics";
+import type { AnalyticsAdapter } from "./adapters";
+
+// Held after a lazy, browser-only init (below) so the adapter stays synchronous + SSR-safe.
+let analytics: Analytics | undefined;
+export function setFirebaseAnalytics(instance: Analytics): void {
+  analytics = instance;
+}
+
+export const firebaseAdapter: AnalyticsAdapter = (event, props) => {
+  if (typeof window === "undefined" || !analytics) return; // SSR-safe + not-yet-ready safe
+  void import("firebase/analytics").then(({ logEvent }) =>
+    logEvent(analytics!, event, props),
+  );
+};
+```
+
+```ts
+// services/analytics/firebase.init.ts — lazy, browser-only init (web)
+import { initializeApp, getApps } from "firebase/app";
+import { getAnalytics, isSupported } from "firebase/analytics";
+import { setFirebaseAnalytics } from "./adapters.firebase.web";
+import { FIREBASE_CONFIG } from "@/constants/analytics";
+
+export async function initFirebaseAnalytics(): Promise<void> {
+  if (typeof window === "undefined") return; // never on the server
+  if (!(await isSupported())) return; // unsupported browser → no-op
+  const app = getApps()[0] ?? initializeApp(FIREBASE_CONFIG);
+  setFirebaseAnalytics(getAnalytics(app)); // adapter goes live after this
+}
+```
+
+```ts
+// services/analytics/adapters.firebase.native.ts — @react-native-firebase/analytics (RN / Expo)
+import analytics from "@react-native-firebase/analytics";
+import type { AnalyticsAdapter } from "./adapters";
+
+export const firebaseAdapter: AnalyticsAdapter = (event, props) => {
+  // RN: no window; the native module is present once the app boots.
+  void analytics().logEvent(event, props);
+};
+```
+
+**Same shape, two files.** Resolve the platform variant by file extension
+(`adapters.firebase.native.ts` via Metro's `.native.ts` resolution, or a `Platform.OS` switch) so
+the **registry, `track` fan-out, consent gate, taxonomy, and `useAnalytics` hook never change**
+across platforms. Firebase's event-name rules (snake_case, lowercase, ≤ 40 chars) line up with the
+taxonomy rules in §2, so the canonical `ANALYTICS_EVENTS` constants are valid Firebase event names
+as-is. Gate `initFirebaseAnalytics()` on consent (§6) — Firebase also exposes
+`setAnalyticsCollectionEnabled(false)` to harden the opt-out.
 
 **Why this shape:** analytics is the _last_ thing that should crash an app. A vendor script that
 fails to load, a global that isn't there yet, an adapter that throws on a malformed prop — all are
@@ -293,19 +354,21 @@ componentDidCatch(error: Error, info: ErrorInfo) {
 
 The taxonomy + fan-out are constant; each provider is one window-guarded adapter.
 
-| Provider              | Adapter call                                          |
-| --------------------- | ----------------------------------------------------- |
-| **GA4**               | `window.gtag("event", name, props)`                   |
-| **Microsoft Clarity** | `window.clarity("event", name)`                       |
-| **PostHog**           | `window.posthog?.capture(name, props)`                |
-| **OpenPanel**         | `op("track", name, props)` or `op.track(name, props)` |
-| **Sentry**            | `Sentry.captureException(error)` (error adapter)      |
+| Provider               | Adapter call                                                                 |
+| ---------------------- | ---------------------------------------------------------------------------- |
+| **Firebase (web)**     | `logEvent(analytics, name, props)` (`firebase/analytics`, lazy browser init) |
+| **Firebase (RN/Expo)** | `analytics().logEvent(name, props)` (`@react-native-firebase/analytics`)     |
+| **GA4**                | `window.gtag("event", name, props)`                                          |
+| **Microsoft Clarity**  | `window.clarity("event", name)`                                              |
+| **PostHog**            | `window.posthog?.capture(name, props)`                                       |
+| **OpenPanel**          | `op("track", name, props)` or `op.track(name, props)`                        |
+| **Sentry**             | `Sentry.captureException(error)` (error adapter)                             |
 
-| Framework                | Wiring                                                                                                                                                                                                                                                                      |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Next.js**              | `AnalyticsProvider` in the root layout (client boundary); vitals via `useReportWebVitals`.                                                                                                                                                                                  |
-| **React + Vite / Remix** | provider at app root; call `reportWebVitals()` in a top-level effect.                                                                                                                                                                                                       |
-| **Expo / React Native**  | swap the web-vitals source for RN performance APIs and the web provider scripts for native SDKs (Firebase/Amplitude/PostHog-RN); the **taxonomy, `track` fan-out, consent gate, and `useAnalytics` hook are unchanged**. Adapters guard the native SDK instead of `window`. |
+| Framework                | Wiring                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Next.js**              | `AnalyticsProvider` in the root layout (client boundary); call `initFirebaseAnalytics()` in a client effect; vitals via `useReportWebVitals`.                                                                                                                                                                                                                 |
+| **React + Vite / Remix** | provider at app root; `initFirebaseAnalytics()` + `reportWebVitals()` in a top-level effect.                                                                                                                                                                                                                                                                  |
+| **Expo / React Native**  | swap the web-vitals source for RN performance APIs and the web provider scripts for native SDKs (**`@react-native-firebase/analytics`**, Amplitude, PostHog-RN); the **taxonomy, `track` fan-out, consent gate, and `useAnalytics` hook are unchanged**. The Firebase adapter is the same shape — it guards the native module instead of `window` (see §3.1). |
 
 ---
 
@@ -332,6 +395,11 @@ leaves in thin client components.
 
 **Adding an event:** add a constant to `ANALYTICS_EVENTS`, then `track(ANALYTICS_EVENTS.NEW_ONE, props)`
 at the interaction. Never inline the string.
+
+**Wiring Firebase Analytics (web + RN):** add a `firebaseAdapter` to the registry using the
+platform-resolved files in §3.1 (`firebase/analytics` on web behind a lazy browser-only
+`initFirebaseAnalytics()`; `@react-native-firebase/analytics` on native). Gate init on consent. The
+taxonomy and fan-out are untouched — Firebase is just one more entry in `analyticsAdapters`.
 
 **Closing the lab/field loop:** wire `reportWebVitals()` and compare field ratings against the
 lighthouse skill's budgets; investigate any "lab green / field poor" gap.
