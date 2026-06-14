@@ -4,10 +4,11 @@
 
 A collection of portable, **framework-agnostic** skills for any React or React Native frontend — packaged as [Agent Skills](https://www.anthropic.com/news/skills) (`SKILL.md`) that Claude Code, Cursor, OpenCode, Codex, Windsurf, and other agents can read and apply.
 
-This repo ships two skills:
+This repo ships three skills:
 
 - **`frontend-architecture`** — organizes apps into **feature modules** with **page/screen directories**, a strict **server-state vs UI-state split**, **barrel-only** cross-module imports, **co-located styles**, and clear **component-promotion** rules.
 - **`frontend-seo`** — a complete **SEO system**: centralized site identity, canonical URLs, per-route metadata (Open Graph + Twitter cards), generated `sitemap.xml` / `robots.txt` / RSS feed, and typed **JSON-LD structured data** (Person, WebSite, BlogPosting, CreativeWork, BreadcrumbList, FAQPage).
+- **`frontend-lighthouse`** — a **Lighthouse CI performance gate**: Core Web Vitals budgets (LCP, INP via the TBT lab proxy, CLS) and category score floors enforced as a blocking PR check, with a `lighthouserc.cjs`, an `lhci` script, and a GitHub Actions workflow.
 
 Both share the same design goals:
 
@@ -31,6 +32,9 @@ npx skills add stareezy-1/frontend-architecture-skill --skill "frontend-architec
 # install just the SEO skill
 npx skills add stareezy-1/frontend-architecture-skill --skill "frontend-seo"
 
+# install just the Lighthouse performance-gate skill
+npx skills add stareezy-1/frontend-architecture-skill --skill "frontend-lighthouse"
+
 # or install every skill in the repo
 npx skills add stareezy-1/frontend-architecture-skill
 ```
@@ -43,10 +47,12 @@ Or copy it manually into your agent's skills directory:
 # Claude Code (project scope)
 mkdir -p .claude/skills && cp -r skills/frontend-architecture .claude/skills/
 cp -r skills/frontend-seo .claude/skills/
+cp -r skills/frontend-lighthouse .claude/skills/
 
 # Cursor / others that read .ai/skills
 mkdir -p .ai/skills && cp -r skills/frontend-architecture .ai/skills/
 cp -r skills/frontend-seo .ai/skills/
+cp -r skills/frontend-lighthouse .ai/skills/
 ```
 
 > Note: `gh skill install` is a preview feature of the GitHub CLI and is not yet available in stable `gh` releases. Use the `npx skills` command above (or manual copy) until it ships.
@@ -189,8 +195,10 @@ sequenceDiagram
 skills/
 ├── frontend-architecture/
 │   └── SKILL.md     ← architecture skill (frontmatter + instructions)
-└── frontend-seo/
-    └── SKILL.md     ← SEO skill (frontmatter + instructions)
+├── frontend-seo/
+│   └── SKILL.md     ← SEO skill (frontmatter + instructions)
+└── frontend-lighthouse/
+    └── SKILL.md     ← Lighthouse performance-gate skill (frontmatter + instructions)
 ```
 
 The **`frontend-architecture`** skill covers:
@@ -258,6 +266,50 @@ The skill covers:
 
 ---
 
+## The `frontend-lighthouse` skill at a glance
+
+A **CI performance gate** built around a single `lighthouserc.cjs`. It runs Lighthouse against the production build (median-of-N runs for stability) and **blocks pull requests** that miss Core Web Vitals budgets or category score floors.
+
+### How the pieces fit
+
+```mermaid
+graph TD
+    PR["Pull request<br/>(touches apps/web/**)"]
+    Workflow[".github/workflows/lighthouse.yml<br/>build → start → lhci → upload"]
+    Script["package.json<br/>lhci: lhci autorun"]
+    Config["lighthouserc.cjs<br/>named budget constants"]
+
+    subgraph Gate["lhci autorun"]
+        Collect["collect<br/>prod server · mobile emulation · 3 runs"]
+        Assert["assert<br/>median-run vs budgets"]
+        Upload["upload<br/>filesystem report artifact"]
+    end
+
+    subgraph Budgets["Budgets (the contract)"]
+        CWV["CWV: LCP ≤ 2500ms · TBT ≤ 200ms · CLS ≤ 0.1"]
+        Cats["Categories: perf ≥ 0.9 · SEO/a11y ≥ 0.95 · best-practices ≥ 0.9"]
+    end
+
+    PR --> Workflow --> Script --> Config
+    Config --> Collect --> Assert --> Upload
+    Budgets --> Assert
+    Assert -->|"any budget exceeded"| Fail["❌ PR blocked"]
+    Assert -->|"all budgets met"| Pass["✅ PR green"]
+```
+
+The skill covers:
+
+1. **Five core ideas** — one config source of truth, gate the production build, median-of-N stability, Google "good" CWV thresholds, blocking-in-CI with report artifacts.
+2. **The config** — `lighthouserc.cjs` with named budget constants and collect/assert/upload sections.
+3. **Budget severity & thresholds** — when to use `error` vs `warn`, and the CWV/category targets.
+4. **The `lhci` script** — local reproduction of the CI run, mobile and desktop form factors.
+5. **The GitHub Actions workflow** — PR-triggered, production-build gate, always-upload reports.
+6. **Framework adapters** — Next.js, Remix, Astro, SvelteKit, Vite (server command + ready pattern).
+7. **Debugging** — flaky runs, missing INP audit, server-ready timeouts, real regressions.
+8. **Review checklist** for the performance gate.
+
+---
+
 ## When the agent should use them
 
 **`frontend-architecture`:**
@@ -275,6 +327,14 @@ The skill covers:
 - Adding schema.org JSON-LD structured data.
 - Fixing canonical-URL or duplicate-content issues.
 - Reviewing SEO coverage before release.
+
+**`frontend-lighthouse`:**
+
+- Adding a performance gate / Lighthouse CI to a project.
+- Tuning Core Web Vitals budgets or category score thresholds.
+- Wiring the Lighthouse GitHub Actions workflow.
+- Debugging flaky or failing Lighthouse runs.
+- Reviewing performance before release.
 
 ---
 
