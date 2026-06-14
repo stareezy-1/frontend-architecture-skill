@@ -15,17 +15,17 @@ It organizes apps into **feature modules** with **page/screen directories**, a s
 
 ## Install
 
-With the [`skills` CLI](https://skills.sh) (works across agents):
+With the [`skills` CLI](https://skills.sh) (works across Claude Code, Cursor, Codex, and more):
 
 ```bash
+# install just this skill
 npx skills add stareezy-1/frontend-architecture-skill --skill "frontend-architecture"
+
+# or install every skill in the repo
+npx skills add stareezy-1/frontend-architecture-skill
 ```
 
-Or with the GitHub CLI:
-
-```bash
-gh skill install stareezy-1/frontend-architecture-skill
-```
+`--skill` (short: `-s`) selects a single skill from the repo; omit it to add all skills. Add `-g` to install globally into `~/` instead of the current project.
 
 Or copy it manually into your agent's skills directory:
 
@@ -35,6 +35,138 @@ mkdir -p .claude/skills && cp -r skills/frontend-architecture .claude/skills/
 
 # Cursor / others that read .ai/skills
 mkdir -p .ai/skills && cp -r skills/frontend-architecture .ai/skills/
+```
+
+> Note: `gh skill install` is a preview feature of the GitHub CLI and is not yet available in stable `gh` releases. Use the `npx skills` command above (or manual copy) until it ships.
+
+---
+
+## The architecture at a glance
+
+The whole model is five rules applied mechanically. The diagrams below show how they fit together.
+
+### 1. Layered structure — routing is thin, modules hold the app
+
+A route file does almost nothing: it imports a page component from a module barrel and mounts it. All real work lives inside feature modules, which lean on a shared layer.
+
+```mermaid
+graph TD
+    subgraph Routing["Routing layer (thin)"]
+        R["app/ · routes/ · navigation/<br/>mounts pages, owns layout/auth boundaries"]
+    end
+
+    subgraph Modules["src/modules/ — feature modules"]
+        direction LR
+        Auth["auth/"]
+        Invoice["invoice/"]
+        Dash["dashboard/"]
+    end
+
+    subgraph Shared["src/shared/ — cross-module building blocks"]
+        direction LR
+        Comp["components/"]
+        ApiClient["api-client/<br/>(only network entry)"]
+        Utils["utils/ · hooks/"]
+    end
+
+    R -->|imports page via barrel| Auth
+    R -->|imports page via barrel| Invoice
+    R -->|imports page via barrel| Dash
+    Auth --> Shared
+    Invoice --> Shared
+    Dash --> Shared
+```
+
+### 2. Inside a module — the barrel is the only public door
+
+Everything inside a module is private except what its `index.ts` re-exports. Other modules and the router may import **only** from `@/modules/{feature}` — never a deep internal path.
+
+```mermaid
+graph TD
+    Outside["Other modules / routing layer"] -->|"@/modules/invoice"| Barrel
+
+    subgraph ModuleInvoice["modules/invoice/"]
+        Barrel["index.ts<br/>PUBLIC BARREL (the contract)"]
+        Pages["pages/&#123;page&#125;/<br/>page.tsx + page.styles.ts + components/ + hooks/"]
+        Components["components/<br/>reused by 2+ pages in this module"]
+        Hooks["hooks/<br/>query/mutation + key factory"]
+        Stores["stores/<br/>UI state only"]
+        Services["services/<br/>data access"]
+        Types["types/"]
+
+        Barrel --- Pages
+        Barrel --- Components
+        Barrel --- Hooks
+        Barrel --- Stores
+        Barrel --- Types
+        Pages --> Components
+        Pages --> Hooks
+        Pages --> Stores
+        Hooks --> Services
+    end
+```
+
+### 3. State is split by origin — and never crosses over
+
+Server data lives in the query/cache layer; UI data lives in the client store. Components read from both but write through hooks — they never `fetch()` directly, and server entities are never copied into the store.
+
+```mermaid
+flowchart LR
+    API[("Backend API")]
+    Client["shared/api-client<br/>(typed, only network entry)"]
+    Query["Query / cache layer<br/>TanStack Query · RTK Query · SWR<br/><i>server state — source of truth</i>"]
+    Store["Client store<br/>Zustand · Redux · MobX · Jotai<br/><i>UI state — dialogs, filters, drafts</i>"]
+    Component["React / RN component"]
+
+    API <--> Client
+    Client <--> Query
+    Query -->|"useInvoiceList()"| Component
+    Store -->|"selector"| Component
+    Component -->|"mutate()"| Query
+    Component -->|"action"| Store
+
+    Query -. "never mirror server data into the store" .-x Store
+```
+
+### 4. Component promotion — start local, move outward only when reused
+
+A component is born in the narrowest scope and is promoted one level only when a **second** consumer appears. The same ladder applies to hooks, utils, and constants.
+
+```mermaid
+graph LR
+    A["Used by ONE page<br/>pages/&#123;page&#125;/components/"]
+    B["Used by 2+ pages in a module<br/>modules/&#123;feature&#125;/components/"]
+    C["Used by 2+ modules<br/>shared/components/"]
+    D["Used by 2+ apps/repos<br/>published package"]
+
+    A -->|"2nd consumer in module"| B
+    B -->|"2nd consuming module"| C
+    C -->|"2nd consuming app"| D
+```
+
+### 5. How a request flows through the layers
+
+Putting it together: a route mounts a page, the page reads server state via a hook and UI state via a selector, mutations go back through the query layer to the API, and styling is referenced from a co-located file.
+
+```mermaid
+sequenceDiagram
+    participant Route as Route file
+    participant Page as Page (module)
+    participant Hook as Data hook
+    participant Query as Query layer
+    participant API as API client
+    participant Store as UI store
+
+    Route->>Page: mount <InvoiceListPage/>
+    Page->>Hook: useInvoiceList(params)
+    Hook->>Query: read cache / fetch
+    Query->>API: GET /invoices
+    API-->>Query: data
+    Query-->>Page: invoices (server state)
+    Page->>Store: read filters (UI state)
+    Page->>Hook: useCreateInvoice().mutate()
+    Hook->>Query: mutation + invalidate keys
+    Query->>API: POST /invoices
 ```
 
 ---
