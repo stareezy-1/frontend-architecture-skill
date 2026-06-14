@@ -4,13 +4,16 @@
 
 A collection of portable, **framework-agnostic** skills for any React or React Native frontend — packaged as [Agent Skills](https://www.anthropic.com/news/skills) (`SKILL.md`) that Claude Code, Cursor, OpenCode, Codex, Windsurf, and other agents can read and apply.
 
-This repo ships three skills:
+This repo ships six skills:
 
 - **`frontend-architecture`** — organizes apps into **feature modules** with **page/screen directories**, a strict **server-state vs UI-state split**, **barrel-only** cross-module imports, **co-located styles**, and clear **component-promotion** rules.
 - **`frontend-seo`** — a complete **SEO system**: centralized site identity, canonical URLs, per-route metadata (Open Graph + Twitter cards), generated `sitemap.xml` / `robots.txt` / RSS feed, and typed **JSON-LD structured data** (Person, WebSite, BlogPosting, CreativeWork, BreadcrumbList, FAQPage).
 - **`frontend-lighthouse`** — a **Lighthouse CI performance gate**: Core Web Vitals budgets (LCP, INP via the TBT lab proxy, CLS) and category score floors enforced as a blocking PR check, with a `lighthouserc.cjs`, an `lhci` script, and a GitHub Actions workflow.
+- **`frontend-data-contracts`** — type safety at the **network edge**: one typed API client as the single fetch boundary, parse-don't-validate, one `{ data } / { error }` envelope, one normalized `ApiError`, branded IDs, and per-field error mapping.
+- **`frontend-optimistic-mutations`** — the **write path**: the optimistic lifecycle (cancel → snapshot → patch → rollback → invalidate), idempotency keys for safe retries, and lock-step detail/list cache coherence.
+- **`frontend-observability`** — the **field side**: a typed event taxonomy, a best-effort non-blocking provider fan-out, real-user Core Web Vitals (the complement to Lighthouse's lab gate), error reporting, and consent gating.
 
-Both share the same design goals:
+All share the same design goals:
 
 - ✅ **State-management agnostic** — Zustand, Redux Toolkit, MobX, Jotai, Valtio, or Context.
 - ✅ **Styling agnostic** — Tailwind, CSS Modules, Tamagui, React Native StyleSheet, styled-components.
@@ -35,6 +38,13 @@ npx skills add stareezy-1/frontend-architecture-skill --skill "frontend-seo"
 # install just the Lighthouse performance-gate skill
 npx skills add stareezy-1/frontend-architecture-skill --skill "frontend-lighthouse"
 
+# install just the data-layer skills
+npx skills add stareezy-1/frontend-architecture-skill --skill "frontend-data-contracts"
+npx skills add stareezy-1/frontend-architecture-skill --skill "frontend-optimistic-mutations"
+
+# install just the observability skill
+npx skills add stareezy-1/frontend-architecture-skill --skill "frontend-observability"
+
 # or install every skill in the repo
 npx skills add stareezy-1/frontend-architecture-skill
 ```
@@ -48,11 +58,17 @@ Or copy it manually into your agent's skills directory:
 mkdir -p .claude/skills && cp -r skills/frontend-architecture .claude/skills/
 cp -r skills/frontend-seo .claude/skills/
 cp -r skills/frontend-lighthouse .claude/skills/
+cp -r skills/frontend-data-contracts .claude/skills/
+cp -r skills/frontend-optimistic-mutations .claude/skills/
+cp -r skills/frontend-observability .claude/skills/
 
 # Cursor / others that read .ai/skills
 mkdir -p .ai/skills && cp -r skills/frontend-architecture .ai/skills/
 cp -r skills/frontend-seo .ai/skills/
 cp -r skills/frontend-lighthouse .ai/skills/
+cp -r skills/frontend-data-contracts .ai/skills/
+cp -r skills/frontend-optimistic-mutations .ai/skills/
+cp -r skills/frontend-observability .ai/skills/
 ```
 
 > Note: `gh skill install` is a preview feature of the GitHub CLI and is not yet available in stable `gh` releases. Use the `npx skills` command above (or manual copy) until it ships.
@@ -197,8 +213,14 @@ skills/
 │   └── SKILL.md     ← architecture skill (frontmatter + instructions)
 ├── frontend-seo/
 │   └── SKILL.md     ← SEO skill (frontmatter + instructions)
-└── frontend-lighthouse/
-    └── SKILL.md     ← Lighthouse performance-gate skill (frontmatter + instructions)
+├── frontend-lighthouse/
+│   └── SKILL.md     ← Lighthouse performance-gate skill (frontmatter + instructions)
+├── frontend-data-contracts/
+│   └── SKILL.md     ← typed network-boundary skill (frontmatter + instructions)
+├── frontend-optimistic-mutations/
+│   └── SKILL.md     ← write-path / optimistic-mutation skill (frontmatter + instructions)
+└── frontend-observability/
+    └── SKILL.md     ← field-side observability skill (frontmatter + instructions)
 ```
 
 The **`frontend-architecture`** skill covers:
@@ -310,6 +332,134 @@ The skill covers:
 
 ---
 
+## The `frontend-data-contracts` skill at a glance
+
+Type safety at the **network edge**. One typed `apiClient` is the only place `fetch` is called; the moment data crosses in, it's parsed into a trusted domain type — or it becomes a single normalized `ApiError`.
+
+### How the pieces fit
+
+```mermaid
+graph LR
+    API[("Backend API<br/>{ data } / { error }")]
+
+    subgraph Boundary["shared/api-client (the only fetch boundary)"]
+        Client["apiClient.get/post/…<br/>buildUrl · headers · fetch"]
+        Parse["parse envelope<br/>+ schema parse (Zod/Valibot)"]
+        Err["ApiError<br/>code · status · fields"]
+    end
+
+    subgraph App["App (downstream)"]
+        Hook["typed query/mutation hook"]
+        Domain["trusted domain value<br/>(branded IDs)"]
+        Form["form field errors"]
+        Toast["localized toast (messageKey)"]
+    end
+
+    API <-->|fetch| Client
+    Client --> Parse
+    Parse -->|success| Domain
+    Parse -->|failure| Err
+    Domain --> Hook --> App
+    Err -->|hasFieldErrors| Form
+    Err -->|messageKey| Toast
+```
+
+The skill covers:
+
+1. **Five core ideas** — one fetch boundary, parse-don't-validate, one envelope, one error type, branded IDs.
+2. **The typed client** — verbs return unwrapped `data`, throw `ApiError`; framework-free.
+3. **Parse, don't validate** — schema parse at the edge turns `unknown` wire JSON into trusted types.
+4. **The envelope** — `{ data } / { error }` unwrapped once.
+5. **Branded identifiers** — nominal `InvoiceId`/`CustomerId` so IDs can't be mixed.
+6. **One normalized error** — server/status/network/abort all become `ApiError`; side effects live in the query layer; per-field errors map to forms.
+7. **Library adapters** — TanStack Query, RTK Query, SWR, RN fetch hooks.
+8. **Review checklist** for the data boundary.
+
+---
+
+## The `frontend-optimistic-mutations` skill at a glance
+
+The **write path**. A mutation feels instant, is safe to retry, and leaves every cache coherent — built on the typed client from `frontend-data-contracts`.
+
+### The optimistic lifecycle
+
+```mermaid
+sequenceDiagram
+    participant UI as Component
+    participant M as useMutation
+    participant C as Query cache
+    participant API as apiClient
+
+    UI->>M: mutate({ id })
+    M->>C: onMutate — cancelQueries (stop late refetch)
+    M->>C: snapshot detail + every list page
+    M->>C: patch detail + matching list rows (instant UI)
+    M->>API: POST (Idempotency-Key from form init)
+    alt success
+        API-->>M: server entity
+        M->>C: onSettled — invalidate detail + lists (refetch authoritative)
+    else error
+        API-->>M: ApiError
+        M->>C: onError — restore snapshots verbatim
+        M->>C: onSettled — invalidate detail + lists
+    end
+```
+
+The skill covers:
+
+1. **Five core ideas** — fixed lifecycle, verbatim rollback, idempotency-once, lock-step caches, server-state-stays-in-cache.
+2. **When to be optimistic** (and when to use a pending state instead).
+3. **The lifecycle** — cancel → snapshot → patch → rollback → invalidate (TanStack Query reference).
+4. **Non-optimistic creates** — seed the cache from the server response.
+5. **Cache coherence** — patch detail + every list page via a hierarchical key factory.
+6. **Idempotency** — keys generated at intent time so retries replay, not double-charge.
+7. **Retry policy** — reads vs writes vs conflicts.
+8. **Library adapters** — TanStack Query, RTK Query, SWR.
+9. **Review checklist** for the write path.
+
+---
+
+## The `frontend-observability` skill at a glance
+
+The **field side** — the complement to the Lighthouse _lab_ gate. A typed event taxonomy and a best-effort fan-out tell you what real users do and experience, without analytics ever being able to crash the app.
+
+### How the pieces fit
+
+```mermaid
+graph TD
+    Const["constants/analytics<br/>ANALYTICS_EVENTS + union type"]
+    Hook["useAnalytics().track<br/>(no-op outside provider / SSR)"]
+    Consent["consent gate<br/>(checked once at fan-out)"]
+    Vitals["web-vitals<br/>real-user LCP/INP/CLS"]
+
+    subgraph FanOut["track() — best-effort, non-blocking"]
+        direction LR
+        GA["gtag adapter"]
+        Clarity["clarity adapter"]
+        PH["posthog adapter"]
+        Err["error adapter (Sentry)"]
+    end
+
+    Const --> Hook --> Consent --> FanOut
+    Vitals --> FanOut
+    FanOut -.->|"each call try/caught — a broken provider can't throw"| FanOut
+    Lab["frontend-lighthouse<br/>lab budget"] -. "same metrics & thresholds" .-> Vitals
+```
+
+The skill covers:
+
+1. **Five core ideas** — typed vocabulary, best-effort fan-out, one SSR-safe entry point, field vitals complement lab budgets, consent gates everything.
+2. **The event taxonomy** — canonical constants + union type, never inline strings.
+3. **The fan-out** — `track()` guards each adapter; absent/throwing providers no-op.
+4. **Provider + hook** — `'use client'` context, `useAnalytics()` no-ops outside a provider.
+5. **Real-user Web Vitals** — reported through the same fan-out, matching the Lighthouse skill's thresholds.
+6. **Consent & privacy** — gated once at the boundary; PII-light props.
+7. **Error reporting** — at deliberate route/segment boundaries.
+8. **Provider & framework adapters** — GA4, Clarity, PostHog, OpenPanel, Sentry; Next.js / Vite / RN.
+9. **Review checklist** for observability.
+
+---
+
 ## When the agent should use them
 
 **`frontend-architecture`:**
@@ -335,6 +485,29 @@ The skill covers:
 - Wiring the Lighthouse GitHub Actions workflow.
 - Debugging flaky or failing Lighthouse runs.
 - Reviewing performance before release.
+
+**`frontend-data-contracts`:**
+
+- Designing or reviewing an API client.
+- Validating or parsing API responses into typed domain values.
+- Modeling request/response types and branded IDs.
+- Handling API errors or mapping server validation to form fields.
+- Stopping raw `fetch` calls from spreading through components.
+
+**`frontend-optimistic-mutations`:**
+
+- Writing create/update/delete mutations.
+- Adding optimistic UI with rollback.
+- Making writes idempotent and safe to retry.
+- Keeping list and detail caches consistent after a write.
+- Reviewing mutation and cache-invalidation code.
+
+**`frontend-observability`:**
+
+- Adding analytics or product tracking.
+- Instrumenting user actions or designing an event schema.
+- Reporting real-user Web Vitals (alongside the Lighthouse lab gate).
+- Wiring error reporting or gating telemetry on consent.
 
 ---
 
